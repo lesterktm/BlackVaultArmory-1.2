@@ -1,0 +1,795 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── FIREARMS ─────────────────────────────────────────────────
+
+model Firearm {
+  id              String   @id @default(cuid())
+  name            String
+  manufacturer    String
+  model           String
+  caliber             String
+  compatibleCalibers  String?
+  serialNumber    String   @unique
+  // FirearmType: PISTOL | RIFLE | SHOTGUN | SMG | PCC | REVOLVER | BOLT_ACTION | LEVER_ACTION
+  type            String
+  acquisitionDate DateTime
+  purchasePrice   Float?
+  currentValue    Float?
+  notes           String?
+  imageUrl        String?
+  // imageSource: "uploaded" | "google_cse" | "seed" | "url"
+  imageSource     String?
+
+  // Maintenance tracking
+  lastMaintenanceDate DateTime?
+  maintenanceIntervalDays Int?
+
+  builds           Build[]
+  rangeSessions    RangeSession[]
+  documents        Document[]
+  maintenanceLogs  MaintenanceLog[]
+  chronographSessions ChronographSession[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([caliber])
+  @@index([type])
+}
+
+// ─── BUILDS ───────────────────────────────────────────────────
+
+model Build {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean     @default(false)
+  sortOrder   Int         @default(0)
+  firearmId   String
+  firearm     Firearm     @relation(fields: [firearmId], references: [id], onDelete: Cascade)
+
+  slots       BuildSlot[]
+  rangeSessions RangeSession[]
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([firearmId])
+  @@index([isActive])
+}
+
+model BuildSlot {
+  id          String     @id @default(cuid())
+  buildId     String
+  build       Build      @relation(fields: [buildId], references: [id], onDelete: Cascade)
+  // SlotType: MUZZLE | BARREL | HANDGUARD | STOCK | BUFFER_TUBE | GRIP | OPTIC | OPTIC_MOUNT |
+  //           UNDERBARREL | MAGAZINE | LIGHT | LASER | CHARGING_HANDLE | TRIGGER |
+  //           LOWER_RECEIVER | UPPER_RECEIVER | SLIDE | FRAME | SUPPRESSOR | BIPOD | SLING | COMPENSATOR
+  slotType    String
+  accessoryId String?
+  accessory   Accessory? @relation(fields: [accessoryId], references: [id], onDelete: SetNull)
+
+  // Position on the weapon canvas (percentage-based, 0-100)
+  positionX   Float?
+  positionY   Float?
+  scaleX      Float?     @default(1.0)
+  scaleY      Float?     @default(1.0)
+  layerIndex  Int?       @default(0)
+
+  @@unique([buildId, slotType])
+  @@index([buildId])
+  @@index([accessoryId])
+}
+
+// ─── ACCESSORIES ──────────────────────────────────────────────
+
+model Accessory {
+  id                     String          @id @default(cuid())
+  name                   String
+  manufacturer           String
+  model                  String?
+  serialNumber           String?
+  // type matches SlotType values above
+  type                   String
+  caliber                String?
+  purchasePrice          Float?
+  acquisitionDate        DateTime?
+  notes                  String?
+  imageUrl               String?
+  imageSource            String?
+
+  // Round count persists with the accessory across all builds
+  roundCount             Int             @default(0)
+  roundCountLogs         RoundCountLog[]
+
+  buildSlots             BuildSlot[]
+  documents              Document[]
+
+  // Comma-separated compatible values, e.g. "RIFLE,SMG"
+  compatibleFirearmTypes String?
+  compatibleCalibers     String?
+
+  // Battery tracking
+  hasBattery             Boolean         @default(false)
+  batteryType            String?
+  lastBatteryChangeDate  DateTime?
+  replacementIntervalDays Int?
+
+  batteryChangeLogs      BatteryChangeLog[]
+
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  @@index([type])
+  @@index([roundCount])
+}
+
+model Document {
+  id         String    @id @default(cuid())
+  name       String
+  type       String
+  fileUrl    String
+  fileSize   Int?
+  mimeType   String?
+  notes      String?
+  firearmId  String?
+  accessoryId String?
+  firearm    Firearm?  @relation(fields: [firearmId], references: [id], onDelete: SetNull)
+  accessory  Accessory? @relation(fields: [accessoryId], references: [id], onDelete: SetNull)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([firearmId])
+  @@index([accessoryId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model RoundCountLog {
+  id            String    @id @default(cuid())
+  accessoryId   String
+  accessory     Accessory @relation(fields: [accessoryId], references: [id], onDelete: Cascade)
+  roundsAdded   Int
+  previousCount Int
+  newCount      Int
+  sessionNote   String?
+  loggedAt      DateTime  @default(now())
+
+  @@index([accessoryId])
+  @@index([loggedAt])
+}
+
+// ─── AMMO ─────────────────────────────────────────────────────
+
+model AmmoStock {
+  id              String            @id @default(cuid())
+  caliber         String
+  brand           String
+  grainWeight     Float?
+  // bulletType: "FMJ" | "HP" | "OTM" | "Frangible" | "Tracer" | "Subsonic" | "Other"
+  bulletType      String?
+  quantity        Int               @default(0)
+  purchasePrice   Float?
+  pricePerRound   Float?
+  purchaseDate    DateTime?
+  storageLocation String?
+  lowStockAlert   Int?
+  notes           String?
+
+  transactions    AmmoTransaction[]
+  rangeSessionLinks RangeSessionAmmoLink[]
+  reloadingBatches ReloadingBatch[]
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([caliber])
+}
+
+// ─── RANGE SESSIONS ──────────────────────────────────────────
+
+model RangeSession {
+  id            String                 @id @default(cuid())
+  sessionDate   DateTime
+  location      String
+  firearmId     String
+  firearm       Firearm                @relation(fields: [firearmId], references: [id], onDelete: Cascade)
+  buildId       String?
+  build         Build?                 @relation(fields: [buildId], references: [id], onDelete: SetNull)
+  roundsFired   Int
+  notes         String?
+
+  ammoLinks     RangeSessionAmmoLink[]
+  sessionDrills SessionDrill[]
+
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@index([sessionDate])
+  @@index([firearmId])
+  @@index([buildId])
+}
+
+model RangeSessionAmmoLink {
+  id             String        @id @default(cuid())
+  rangeSessionId String
+  rangeSession   RangeSession  @relation(fields: [rangeSessionId], references: [id], onDelete: Cascade)
+  ammoStockId    String?
+  ammoStock      AmmoStock?    @relation(fields: [ammoStockId], references: [id], onDelete: SetNull)
+  roundsUsed     Int
+  createdAt      DateTime      @default(now())
+
+  @@index([rangeSessionId])
+  @@index([ammoStockId])
+}
+
+model SessionDrill {
+  id             String       @id @default(cuid())
+  rangeSessionId String
+  rangeSession   RangeSession @relation(fields: [rangeSessionId], references: [id], onDelete: Cascade)
+  name           String
+  setNumber      Int          @default(1)
+  timeSeconds    Float?
+  points         Float?
+  penalties      Float?
+  hits           Int?
+  hitFactor      Float
+  notes          String?
+  sortOrder      Int          @default(0)
+  drillDate      DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([rangeSessionId])
+}
+
+model AmmoTransaction {
+  id           String   @id @default(cuid())
+  stockId      String
+  stock        AmmoStock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+  // type: PURCHASE | RANGE_USE | TRANSFER_OUT | INVENTORY_CORRECTION | EXPENDED
+  type         String
+  quantity     Int
+  previousQty  Int
+  newQty       Int
+  note          String?
+  transactedAt  DateTime  @default(now())
+  purchasePrice Float?
+  pricePerRound Float?
+  purchaseDate  DateTime?
+
+  @@index([stockId])
+  @@index([transactedAt])
+}
+
+// ─── RELOADING: POWDER ──────────────────────────────────────────
+
+model PowderInventory {
+  id                 String    @id @default(cuid())
+  manufacturer       String
+  productName        String
+  // powderType: Smokeless - Single Base | Smokeless - Double Base | Black Powder | Black Powder Substitute
+  powderType         String
+  // burnRateCategory: Fast | Medium-Fast | Medium | Medium-Slow | Slow | Very Slow
+  burnRateCategory   String?
+  burnRateNumber     Int?
+  // granuleShape: Ball/Spherical | Extruded/Stick | Flake
+  granuleShape       String?
+  color              String?
+
+  quantityOnHandGrains Float   @default(0)
+  numberOfContainers   Int?
+  // containerSizeLbs: 1 lb | 4 lb | 8 lb | Other
+  containerSizeLbs     String?
+  lotNumber            String?
+  dateAcquired         DateTime?
+  storageLocation      String?
+  // condition: New/Sealed | Open - Good | Open - Degraded | Unknown
+  condition            String?
+
+  purchasePrice        Float?
+  hazmatFeePaid         Boolean @default(false)
+  vendor                String?
+
+  // Comma-separated tags
+  intendedCalibersOrApplications String?
+  compatibleBulletWeightMin      Float?
+  compatibleBulletWeightMax      Float?
+  typicalChargeMin                Float?
+  typicalChargeMax                Float?
+  loadDataReference                String?
+  notes                            String?
+
+  maxStorageQuantityLbs Float?
+  hazardClassification  String?
+
+  // Reorder alert — spec's Implementation Notes suggestion, not raw low-stock like AmmoStock
+  reorderThreshold      Float?
+
+  transactions          PowderTransaction[]
+  loadRecipes            LoadRecipe[]
+
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([powderType])
+  @@index([manufacturer])
+}
+
+model PowderTransaction {
+  id            String           @id @default(cuid())
+  powderId      String
+  powder        PowderInventory  @relation(fields: [powderId], references: [id], onDelete: Cascade)
+  // type: PURCHASE | CONSUMED | ADJUSTMENT
+  type          String
+  quantity      Float
+  previousQty   Float
+  newQty        Float
+  note          String?
+  batchId       String?
+  batch         ReloadingBatch?  @relation("PowderTxBatch", fields: [batchId], references: [id], onDelete: SetNull)
+  transactedAt  DateTime         @default(now())
+  purchasePrice Float?
+  pricePerUnit  Float?
+  purchaseDate  DateTime?
+
+  @@index([powderId])
+  @@index([transactedAt])
+  @@index([batchId])
+}
+
+// ─── RELOADING: PRIMER ──────────────────────────────────────────
+
+model PrimerInventory {
+  id                 String    @id @default(cuid())
+  manufacturer       String
+  productName        String
+  // primerType: Large Rifle | Small Rifle | Large Pistol | Small Pistol | Shotshell (209) | Rimfire (informational only)
+  primerType         String
+  isMagnum           Boolean   @default(false)
+  isMatch            Boolean   @default(false)
+  // primerSystem: Boxer | Berdan
+  primerSystem       String    @default("Boxer")
+  // sensitivityRating: Standard | Hard / Military
+  sensitivityRating  String?
+
+  quantityOnHand     Int       @default(0)
+  numberOfBoxes      Int?
+  numberOfSleeves    Int?
+  numberOfBricks     Int?
+  // countPerContainer: 100 | 500 | 1000 | Other
+  countPerContainer  String?
+  lotNumber          String?
+  dateAcquired       DateTime?
+  storageLocation    String?
+  // condition: New/Sealed | Open - Good | Open - Degraded | Unknown
+  condition          String?
+
+  purchasePrice      Float?
+  hazmatFeePaid      Boolean   @default(false)
+  vendor             String?
+
+  intendedCalibersOrApplications String?
+  compatiblePowderTypes           String?
+  seatingDepthNotes                String?
+  loadDataReference                 String?
+  notes                             String?
+
+  maxStorageQuantityCount Int?
+  hazardClassification    String?
+
+  reorderThreshold        Int?
+
+  transactions             PrimerTransaction[]
+  loadRecipes               LoadRecipe[]
+
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@index([primerType])
+  @@index([manufacturer])
+}
+
+model PrimerTransaction {
+  id            String           @id @default(cuid())
+  primerId      String
+  primer        PrimerInventory  @relation(fields: [primerId], references: [id], onDelete: Cascade)
+  type          String
+  quantity      Int
+  previousQty   Int
+  newQty        Int
+  note          String?
+  batchId       String?
+  batch         ReloadingBatch?  @relation("PrimerTxBatch", fields: [batchId], references: [id], onDelete: SetNull)
+  transactedAt  DateTime         @default(now())
+  purchasePrice Float?
+  pricePerUnit  Float?
+  purchaseDate  DateTime?
+
+  @@index([primerId])
+  @@index([transactedAt])
+  @@index([batchId])
+}
+
+// ─── RELOADING: BRASS / CASES ───────────────────────────────────
+
+model BrassInventory {
+  id                 String    @id @default(cuid())
+  caliber            String
+  headstamp          String?
+  manufacturer       String?
+  // caseMaterial: Brass | Nickel-Plated Brass | Steel | Aluminum
+  caseMaterial       String    @default("Brass")
+  // primerSystem: Boxer | Berdan
+  primerSystem       String    @default("Boxer")
+  // caseOrigin: New/Unprimed | Commercial Once-Fired | Military Surplus | Range Pickup | Pulled/Disassembled
+  caseOrigin         String?
+  isMilitaryBrass    Boolean   @default(false)
+  isMixedHeadstamp   Boolean   @default(false)
+
+  firingCount        Int       @default(0)
+  maxFiringCount     Int?
+  // preparationStatus: Raw/As-Received | Decapped | Cleaned | Sized & Decapped | Trimmed | Primer Pocket Prepped | Ready to Load
+  preparationStatus  String?
+  isAnnealed              Boolean @default(false)
+  annealingCount          Int     @default(0)
+  isNeckTurned            Boolean @default(false)
+  isFlashHoleDeburred     Boolean @default(false)
+  isPrimerPocketUniformed Boolean @default(false)
+  isPrimerPocketSwaged    Boolean @default(false)
+
+  quantityOnHand      Int       @default(0)
+  quantityReadyToLoad Int       @default(0)
+  quantityInProcess   Int       @default(0)
+  quantityRetired     Int       @default(0)
+  lotIdentifier       String?
+  dateAcquired        DateTime?
+  storageLocation     String?
+
+  trimToLengthIn      Float?
+  maxCaseLengthIn     Float?
+  currentAvgLengthIn  Float?
+  headDiameterIn      Float?
+  neckWallThicknessIn Float?
+  dimensionalNotes    String?
+
+  purchasePrice       Float?
+  vendor              String?
+  // source: Purchased New | Purchased Once-Fired | Range Pickup (Free) | Traded | Pulled from Loaded Ammo
+  source              String?
+
+  intendedLoad        String?
+  compatibleDies       String?
+  loadDataReference     String?
+  notes                 String?
+
+  transactions           BrassTransaction[]
+  loadRecipes              LoadRecipe[]
+
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@index([caliber])
+  @@index([preparationStatus])
+}
+
+model BrassTransaction {
+  id            String          @id @default(cuid())
+  brassId       String
+  brass         BrassInventory  @relation(fields: [brassId], references: [id], onDelete: Cascade)
+  type          String
+  quantity      Int
+  previousQty   Int
+  newQty        Int
+  note          String?
+  batchId       String?
+  batch         ReloadingBatch? @relation("BrassTxBatch", fields: [batchId], references: [id], onDelete: SetNull)
+  transactedAt  DateTime        @default(now())
+  purchasePrice Float?
+  pricePerUnit  Float?
+  purchaseDate  DateTime?
+
+  @@index([brassId])
+  @@index([transactedAt])
+  @@index([batchId])
+}
+
+// ─── RELOADING: BULLET / PROJECTILE ─────────────────────────────
+
+model BulletInventory {
+  id                 String    @id @default(cuid())
+  manufacturer       String
+  productLine        String?
+  productName        String
+  caliberDiameterIn  Float
+  caliberLabel       String?
+  weightGrains       Float
+  // bulletType: FMJ | JHP | JSP | BTHP | Solid Copper / Monolithic | Cast Lead | Plated | Frangible | Wadcutter | Semi-Wadcutter | Polymer Tip
+  bulletType         String
+  // baseStyle: Flat Base | Boat Tail
+  baseStyle          String?
+  // noseStyle: Round Nose | Flat Point | Soft Point | Hollow Point | Polymer Tip | Open Tip Match (OTM) | Wadcutter
+  noseStyle          String?
+  // intendedUse: comma-separated tags from Target / Match, Hunting, Self-Defense / Home Defense, Plinking / Practice, Varmint, Long Range
+  intendedUse        String?
+
+  // coreConstruction: Bonded Lead | Non-Bonded Lead | Lead-Free (solid copper, brass, or zinc) | Partitioned | Dual-Core
+  coreConstruction   String?
+  // jacketMaterial: Gilding Metal (copper alloy) | Copper | Polymer Coat | None (cast or solid)
+  jacketMaterial     String?
+  isLeadFree         Boolean   @default(false)
+  hasCannelure       Boolean   @default(false)
+  hasBoattailGasCheck Boolean  @default(false)
+
+  bcG1                Float?
+  bcG7                Float?
+  bulletLengthIn      Float?
+  baseToOgiveIn       Float?
+  twistRateMin        String?
+  twistRateRecommended String?
+
+  quantityOnHand      Int       @default(0)
+  numberOfBoxes       Int?
+  // countPerBox: 50 | 100 | 250 | 500 | 1000 | Other
+  countPerBox         String?
+  lotNumber           String?
+  dateAcquired        DateTime?
+  storageLocation     String?
+  // condition: New | Open - Good | Damaged / Cosmetic Defects
+  condition           String?
+
+  purchasePrice        Float?
+  vendor                String?
+
+  intendedCalibersOrCartridges String?
+  recommendedCoalIn              Float?
+  recommendedHundredthsJump       Float?
+  compatiblePowders                String?
+  loadDataReference                 String?
+  notes                             String?
+
+  reorderThreshold      Int?
+
+  transactions             BulletTransaction[]
+  loadRecipes                LoadRecipe[]
+
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  @@index([caliberLabel])
+  @@index([bulletType])
+  @@index([weightGrains])
+}
+
+model BulletTransaction {
+  id            String           @id @default(cuid())
+  bulletId      String
+  bullet        BulletInventory  @relation(fields: [bulletId], references: [id], onDelete: Cascade)
+  type          String
+  quantity      Int
+  previousQty   Int
+  newQty        Int
+  note          String?
+  batchId       String?
+  batch         ReloadingBatch?  @relation("BulletTxBatch", fields: [batchId], references: [id], onDelete: SetNull)
+  transactedAt  DateTime         @default(now())
+  purchasePrice Float?
+  pricePerUnit  Float?
+  purchaseDate  DateTime?
+
+  @@index([bulletId])
+  @@index([transactedAt])
+  @@index([batchId])
+}
+
+// ─── RELOADING: LOAD RECIPE ──────────────────────────────────────
+
+model LoadRecipe {
+  id               String    @id @default(cuid())
+  recipeName       String
+  caliberCartridge String
+  // status: Development | Working / Proven | Retired
+  status           String    @default("Development")
+  // intendedUse: comma-separated tags
+  intendedUse      String?
+  isFavorite       Boolean   @default(false)
+  notes            String?
+
+  bulletId            String?
+  bullet              BulletInventory? @relation(fields: [bulletId], references: [id], onDelete: SetNull)
+  // Denormalized snapshot — retained even if the bullet entry is later edited/deleted
+  bulletWeightGrains   Float?
+  bulletDiameterIn     Float?
+
+  powderId             String?
+  powder               PowderInventory? @relation(fields: [powderId], references: [id], onDelete: SetNull)
+  chargeWeightGrains   Float
+
+  primerId             String?
+  primer               PrimerInventory? @relation(fields: [primerId], references: [id], onDelete: SetNull)
+
+  brassId              String?
+  brass                BrassInventory? @relation(fields: [brassId], references: [id], onDelete: SetNull)
+  brassFireCount       Int?
+
+  coalIn               Float
+  cbtoIn               Float?
+  jumpToLandsIn        Float?
+  // crimpType: None | Taper Crimp | Roll Crimp
+  crimpType            String?
+  crimpAmountIn        Float?
+
+  publishedChargeMinGrains Float?
+  publishedChargeMaxGrains Float?
+  publishedVelocityFps      Int?
+  expectedVelocityFps        Int?
+  publishedPressurePsi        Int?
+  publishedPressureCup        Int?
+  publishedBarrelLengthIn      Float?
+  loadDataSource                String?
+
+  // primerAppearance: Normal | Slight Cratering | Cratered | Flattened | Pierced
+  primerAppearance      String?
+  // ejectorMarks: None | Light | Moderate | Heavy
+  ejectorMarks           String?
+  // extractionDifficulty: Normal | Slightly Stiff | Very Stiff | Stuck
+  extractionDifficulty   String?
+  caseHeadExpansionIn    Float?
+  // pressureAssessment: Safe - Mild | Safe - Moderate | Safe - Near Max | UNSAFE - Over Max
+  pressureAssessment     String?
+  pressureNotes          String?
+
+  batches                 ReloadingBatch[]
+  chronographSessions     ChronographSession[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([caliberCartridge])
+  @@index([status])
+  @@index([bulletId])
+  @@index([powderId])
+  @@index([primerId])
+  @@index([brassId])
+}
+
+// ─── RELOADING: CHRONOGRAPH SESSION ──────────────────────────────
+
+model ChronographSession {
+  id                String     @id @default(cuid())
+  recipeId          String
+  recipe            LoadRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  sessionDate       DateTime
+  sessionLabel      String?
+  firearmId         String?
+  firearm           Firearm?   @relation(fields: [firearmId], references: [id], onDelete: SetNull)
+  barrelLengthIn    Float?
+  testDistanceYards Float?
+  chronographModel  String?
+
+  temperatureFahrenheit Float?
+  altitudeFt             Int?
+  humidityPercent          Float?
+  weatherConditions        String?
+
+  // JSON-stringified number[] of raw shot velocities in fps — all statistics
+  // (avg/min/max/ES/SD/MAD/velocityDelta) are derived from this, never stored
+  shotVelocities String
+
+  groupSizeIn          Float?
+  groupDistanceYards   Int?
+  numberOfShotsInGroup Int?
+  pointOfImpactNotes    String?
+
+  sessionNotes          String?
+  isConfirmationSession Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([recipeId])
+  @@index([sessionDate])
+  @@index([firearmId])
+}
+
+// ─── RELOADING: BATCH LOG ────────────────────────────────────────
+
+model ReloadingBatch {
+  id               String   @id @default(cuid())
+  recipeId         String
+  recipe           LoadRecipe @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  batchDate        DateTime
+  quantityProduced Int
+  reusedBrass      Boolean  @default(false)
+  totalCost        Float?
+  costPerRound     Float?
+  notes            String?
+
+  ammoStockId      String?
+  ammoStock        AmmoStock? @relation(fields: [ammoStockId], references: [id], onDelete: SetNull)
+
+  powderTransactions PowderTransaction[] @relation("PowderTxBatch")
+  primerTransactions PrimerTransaction[] @relation("PrimerTxBatch")
+  brassTransactions  BrassTransaction[]  @relation("BrassTxBatch")
+  bulletTransactions BulletTransaction[] @relation("BulletTxBatch")
+
+  createdAt DateTime @default(now())
+
+  @@index([recipeId])
+  @@index([batchDate])
+  @@index([ammoStockId])
+}
+
+// ─── IMAGE CACHE ──────────────────────────────────────────────
+
+model ImageCache {
+  id          String   @id @default(cuid())
+  entityType  String
+  entityId    String
+  searchQuery String
+  imageUrl    String
+  // source: "google_cse" | "uploaded" | "seed" | "url"
+  source      String
+  isApproved  Boolean  @default(false)
+  width       Int?
+  height      Int?
+  cachedAt    DateTime @default(now())
+
+  @@index([entityType, entityId])
+}
+
+// ─── BATTERY CHANGE LOG ───────────────────────────────────────
+
+model BatteryChangeLog {
+  id          String    @id @default(cuid())
+  accessoryId String
+  accessory   Accessory @relation(fields: [accessoryId], references: [id], onDelete: Cascade)
+  changedAt   DateTime  @default(now())
+  batteryType String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  @@index([accessoryId])
+  @@index([changedAt])
+}
+
+// ─── MAINTENANCE LOG ──────────────────────────────────────────
+
+model MaintenanceLog {
+  id         String   @id @default(cuid())
+  firearmId  String
+  firearm    Firearm  @relation(fields: [firearmId], references: [id], onDelete: Cascade)
+  date       DateTime
+  notes      String
+  roundCount Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([firearmId])
+  @@index([date])
+}
+
+// ─── SETTINGS ─────────────────────────────────────────────────
+
+model AppSettings {
+  id                      String   @id @default("singleton")
+  googleCseApiKey         String?
+  googleCseSearchEngineId String?
+  enableImageSearch       Boolean  @default(false)
+  includeUploadsInBackup  Boolean  @default(true)
+  autoBackupEnabled       Boolean  @default(false)
+  autoBackupCadence       String   @default("weekly")
+  backupDestinationPath   String?
+  manualLanHost           String?
+  defaultCurrency         String   @default("USD")
+  appPassword             String?
+  defaultAmmoAlertThreshold Int?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}

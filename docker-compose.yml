@@ -1,0 +1,28 @@
+# BlackVault — Production compose (amd64 + arm64)
+#
+# First time: run ./install.sh (Mac/Linux) or install.bat (Windows)
+# Updates:    run ./update.sh  (Mac/Linux) or update.bat  (Windows)
+# Manual run: copy .env.example to .env, edit DATA_DIR, then: docker compose up -d
+#
+# Docker Compose reads .env automatically — no --env-file flag needed.
+# For local development, use docker-compose.dev.yml instead.
+
+services:
+  blackvault:
+    build: .
+    container_name: blackvault
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/data/vault.db?connection_limit=1
+      - VAULT_ENCRYPTION_KEY=${VAULT_ENCRYPTION_KEY:-}
+    volumes:
+      - ${DATA_DIR:-./data}/db:/app/data
+      - ${DATA_DIR:-./data}/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
