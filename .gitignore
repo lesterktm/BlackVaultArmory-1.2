@@ -50,8 +50,10 @@ prisma/dev.db-journal
 # User uploads
 /uploads/
 
+# Docker Compose persistent data volume (real database + uploaded images)
+/data/
+
 # PR hygiene for runtime/binary artifacts
-uploads/
 prisma/*.db
 prisma/prisma/*.db
 prisma/prisma/*.db-journal
