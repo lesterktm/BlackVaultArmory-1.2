@@ -1,6 +1,6 @@
 # BlackVault
 
-A self-hosted, local-only web app for tracking firearms, accessories, and range sessions. All data stays on your machine.
+A self-hosted, local-only web app for tracking firearms, accessories, and range sessions. All data stays on your machine. My fork has added a Reloading Section.
 
 ---
 
