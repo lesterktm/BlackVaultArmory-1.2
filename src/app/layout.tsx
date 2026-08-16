@@ -42,7 +42,7 @@ export default function RootLayout({
             <Sidebar />
             <div className="flex flex-col flex-1 min-w-0 min-h-svh overflow-x-clip">
               <MobileHeader />
-              <main className="flex-1 min-h-0 overflow-y-auto overflow-x-clip overscroll-contain min-w-0 pb-safe">
+              <main className="flex-1 min-w-0 overflow-x-clip pb-safe">
                 <ErrorBoundary>
                   {children}
                 </ErrorBoundary>

@@ -241,7 +241,7 @@ export function Sidebar({ mobileOnly = false, mobileOpen = false, onMobileClose 
   return (
     <>
       {!mobileOnly && (
-        <aside className={cn("hidden md:flex flex-col h-svh border-r border-vault-border bg-vault-surface transition-all duration-300 ease-in-out shrink-0", collapsed ? "w-16" : "w-56")}>
+        <aside className={cn("hidden md:flex flex-col h-svh sticky top-0 border-r border-vault-border bg-vault-surface transition-all duration-300 ease-in-out shrink-0", collapsed ? "w-16" : "w-56")}>
           {navContent}
         </aside>
       )}
