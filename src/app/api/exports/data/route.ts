@@ -449,7 +449,7 @@ export async function GET(request: NextRequest) {
           kind,
           sourceId: normalizedSourceId,
           url: normalizedUrl,
-          storagePath: normalizedUrl.replace("/api/files/", "storage/uploads/"),
+          storagePath: normalizedUrl.replace("/api/files/", "uploads/"),
         });
       };
 
@@ -480,9 +480,9 @@ export async function GET(request: NextRequest) {
       payload.uploadedAssetReferences = uploadReferences;
       payload.backupStorageGuidance = {
         summary:
-          "Uploaded files live under storage/uploads. Copy that folder together with this export JSON/CSV file.",
+          "Uploaded files live under uploads/documents. Copy that folder together with this export JSON/CSV file.",
         volumeHint:
-          "Docker hint: mount a persistent host path to /app/storage (example: ./storage:/app/storage) so uploads and backups survive container rebuilds.",
+          "Docker hint: this is already the persistent volume mounted at ./data/uploads:/app/uploads (see docker-compose.yml), so it survives container rebuilds as long as that volume isn't deleted.",
       };
     }
 

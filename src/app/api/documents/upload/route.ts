@@ -15,7 +15,7 @@ const MAX_SIZE = 20 * 1024 * 1024; // 20MB
 
 // POST /api/documents/upload
 // Accepts multipart form data: file, name, type, firearmId?, accessoryId?, notes?
-// Saves to /storage/uploads/documents/{uuid}.{ext}
+// Saves to <uploads root>/documents/{uuid}.{ext} (see getCanonicalUploadsRoot)
 // Creates a Document record and returns it.
 export async function POST(request: NextRequest) {
   const auth = await requireAuth();

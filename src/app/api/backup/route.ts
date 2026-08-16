@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/server/auth";
+import { collectBackupFileEntries, readBackupFiles } from "@/lib/server/backup-files";
+import JSZip from "jszip";
 import fs from "fs";
 import path from "path";
 
@@ -42,40 +44,87 @@ export async function POST() {
       imageCache,
     };
 
+    const includeUploads = settings?.includeUploadsInBackup ?? true;
+
     const meta = {
       version: "1.0",
       createdAt: now.toISOString(),
-      includeUploads: settings?.includeUploadsInBackup ?? true,
+      includeUploads,
       counts: Object.fromEntries(Object.entries(backupData).map(([k, v]) => [k, v.length])),
     };
 
     const payload = { meta, ...backupData };
     const json = JSON.stringify(payload, null, 2);
-    const sizeMB = (Buffer.byteLength(json, "utf8") / 1_048_576).toFixed(2);
 
-    const filename = `blackvault-backup-${timestamp}.json`;
+    // includeUploads=false keeps the original lightweight JSON-only response —
+    // no files, no zip overhead, unchanged from before this feature existed.
+    if (!includeUploads) {
+      const filename = `blackvault-backup-${timestamp}.json`;
+      const sizeMB = (Buffer.byteLength(json, "utf8") / 1_048_576).toFixed(2);
 
-    // Optional server-side save — non-fatal if it fails
+      let savedToPath: string | undefined;
+      if (settings?.backupDestinationPath) {
+        try {
+          const destDir = settings.backupDestinationPath;
+          if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+          const fullPath = path.join(destDir, filename);
+          fs.writeFileSync(fullPath, json, "utf8");
+          savedToPath = fullPath;
+        } catch (fsErr) {
+          console.warn("Could not write backup to disk:", fsErr);
+        }
+      }
+
+      return NextResponse.json({ success: true, filename, meta, data: backupData, savedToPath, sizeMB });
+    }
+
+    // includeUploads=true: bundle the JSON data together with the actual
+    // uploaded document/image files into a single zip, so backup and restore
+    // move everything as one unit instead of just path references.
+    const fileEntries = collectBackupFileEntries({ documents, firearms, accessories });
+    const { found, missing } = await readBackupFiles(fileEntries);
+
+    const zip = new JSZip();
+    zip.file("backup.json", json);
+    for (const entry of found) {
+      zip.file(entry.zipPath, entry.buffer);
+    }
+
+    const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    const filename = `blackvault-backup-${timestamp}.zip`;
+    const sizeMB = (zipBuffer.byteLength / 1_048_576).toFixed(2);
+
     let savedToPath: string | undefined;
     if (settings?.backupDestinationPath) {
       try {
         const destDir = settings.backupDestinationPath;
         if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
         const fullPath = path.join(destDir, filename);
-        fs.writeFileSync(fullPath, json, "utf8");
+        fs.writeFileSync(fullPath, zipBuffer);
         savedToPath = fullPath;
       } catch (fsErr) {
         console.warn("Could not write backup to disk:", fsErr);
       }
     }
 
-    return NextResponse.json({
-      success: true,
-      filename,
-      meta,
-      data: backupData,
-      savedToPath,
-      sizeMB,
+    if (missing.length > 0) {
+      console.warn(
+        `Backup: ${missing.length} referenced file(s) were not found on disk and were skipped:`,
+        missing.map((m) => m.diskPath)
+      );
+    }
+
+    return new NextResponse(new Uint8Array(zipBuffer), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "X-Backup-Filename": filename,
+        "X-Backup-Size-Mb": sizeMB,
+        "X-Backup-File-Count": String(found.length),
+        "X-Backup-Missing-File-Count": String(missing.length),
+        "X-Backup-Saved-Path": savedToPath ? encodeURIComponent(savedToPath) : "",
+      },
     });
   } catch (error) {
     console.error("POST /api/backup error:", error);

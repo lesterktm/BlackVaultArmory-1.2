@@ -33,13 +33,20 @@ export default function SettingsPage() {
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
 
   const [backupStatus, setBackupStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
-  const [backupResult, setBackupResult] = useState<{ filename: string; savedToPath?: string; sizeMB: string } | null>(null);
+  const [backupResult, setBackupResult] = useState<{
+    filename: string;
+    savedToPath?: string;
+    sizeMB: string;
+    fileCount?: number;
+    missingFileCount?: number;
+  } | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoreStatus, setRestoreStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [restoreError, setRestoreError] = useState<string | null>(null);
   const [pendingRestoreFile, setPendingRestoreFile] = useState<File | null>(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState(false);
   const [restoreCounts, setRestoreCounts] = useState<Record<string, number> | null>(null);
+  const [restoreFileCounts, setRestoreFileCounts] = useState<{ restored: number; skipped: number } | null>(null);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -160,6 +167,38 @@ export default function SettingsPage() {
     setBackupResult(null);
     try {
       const res = await fetch("/api/backup", { method: "POST" });
+
+      const responseContentType = res.headers.get("Content-Type") ?? "";
+      if (responseContentType.includes("application/zip")) {
+        if (!res.ok) {
+          setBackupStatus("error");
+          setBackupError("Backup failed.");
+          return;
+        }
+        const filename = res.headers.get("X-Backup-Filename") ?? "blackvault-backup.zip";
+        const savedToPathHeader = res.headers.get("X-Backup-Saved-Path");
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setBackupResult({
+          filename,
+          savedToPath: savedToPathHeader ? decodeURIComponent(savedToPathHeader) : undefined,
+          sizeMB: res.headers.get("X-Backup-Size-Mb") ?? "?",
+          fileCount: Number(res.headers.get("X-Backup-File-Count") ?? 0),
+          missingFileCount: Number(res.headers.get("X-Backup-Missing-File-Count") ?? 0),
+        });
+        setBackupStatus("success");
+        setTimeout(() => { setBackupStatus("idle"); setBackupResult(null); }, 8000);
+        return;
+      }
+
+      // includeUploadsInBackup is off — server returned the lightweight JSON-only response
       const json = await res.json();
       if (!res.ok || !json.success) {
         setBackupStatus("error");
@@ -191,6 +230,7 @@ export default function SettingsPage() {
     setRestoreStatus("idle");
     setRestoreError(null);
     setRestoreCounts(null);
+    setRestoreFileCounts(null);
   }
 
   async function handleRestoreConfirm() {
@@ -199,19 +239,11 @@ export default function SettingsPage() {
     setRestoreStatus("loading");
     setRestoreError(null);
     try {
-      const text = await pendingRestoreFile.text();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        setRestoreStatus("error");
-        setRestoreError("The selected file is not valid JSON. Please select a .json backup file.");
-        return;
-      }
+      const formData = new FormData();
+      formData.append("file", pendingRestoreFile);
       const res = await fetch("/api/backup/restore", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(parsed),
+        body: formData,
       });
       const json = await res.json();
       if (!res.ok || !json.success) {
@@ -220,6 +252,7 @@ export default function SettingsPage() {
         return;
       }
       setRestoreCounts(json.counts);
+      setRestoreFileCounts(json.fileCounts ?? null);
       setRestoreStatus("success");
       setPendingRestoreFile(null);
     } catch {
@@ -332,7 +365,9 @@ export default function SettingsPage() {
                 <div>
                   <p className="text-sm font-medium text-vault-text">Backup Now</p>
                   <p className="mt-0.5 text-xs text-vault-text-muted">
-                    Downloads a complete JSON backup of all vault data.
+                    {includeUploadsInBackup
+                      ? "Downloads a .zip with all vault data plus your uploaded images and documents."
+                      : "Downloads a .json backup of all vault data (no files)."}
                     {backupDestinationPath && " Also saves to your configured destination."}
                   </p>
                 </div>
@@ -353,6 +388,13 @@ export default function SettingsPage() {
                   <p className="text-xs font-medium text-[#00C853]">Backup complete</p>
                   <p className="font-mono text-xs text-[#00C853]/80">{backupResult.filename}</p>
                   <p className="text-xs text-[#00C853]/70">{backupResult.sizeMB} MB</p>
+                  {backupResult.fileCount !== undefined && (
+                    <p className="text-xs text-[#00C853]/70">
+                      {backupResult.fileCount} file{backupResult.fileCount === 1 ? "" : "s"} included
+                      {Boolean(backupResult.missingFileCount) &&
+                        ` (${backupResult.missingFileCount} referenced file${backupResult.missingFileCount === 1 ? "" : "s"} could not be found and were skipped)`}
+                    </p>
+                  )}
                   {backupResult.savedToPath && (
                     <p className="text-xs text-[#00C853]/70">
                       Also saved to: <span className="font-mono">{backupResult.savedToPath}</span>
@@ -379,12 +421,12 @@ export default function SettingsPage() {
                   className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-vault-border bg-vault-surface px-3 py-2 text-sm text-vault-text-muted hover:text-vault-text transition-colors"
                 >
                   <Upload className="h-4 w-4" />
-                  {pendingRestoreFile ? pendingRestoreFile.name : "Choose .json backup file"}
+                  {pendingRestoreFile ? pendingRestoreFile.name : "Choose .zip or .json backup file"}
                 </label>
                 <input
                   id="restore-file-input"
                   type="file"
-                  accept=".json,application/json"
+                  accept=".json,application/json,.zip,application/zip"
                   className="sr-only"
                   onChange={handleRestoreFileChange}
                 />
@@ -438,6 +480,12 @@ export default function SettingsPage() {
                     {restoreCounts.firearms ?? 0} firearms · {restoreCounts.accessories ?? 0} accessories ·{" "}
                     {restoreCounts.ammoStocks ?? 0} ammo stocks · {restoreCounts.rangeSessions ?? 0} range sessions
                   </p>
+                  {restoreFileCounts && (
+                    <p className="text-xs text-[#00C853]/70">
+                      {restoreFileCounts.restored} file{restoreFileCounts.restored === 1 ? "" : "s"} restored
+                      {Boolean(restoreFileCounts.skipped) && ` (${restoreFileCounts.skipped} skipped)`}
+                    </p>
+                  )}
                 </div>
               )}
               {restoreStatus === "error" && restoreError && (

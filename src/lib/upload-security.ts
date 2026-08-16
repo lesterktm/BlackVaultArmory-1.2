@@ -86,7 +86,13 @@ export function validateUploadBuffer(
 const SAFE_FILE_NAME = /^[a-zA-Z0-9._-]+$/;
 
 export function getCanonicalUploadsRoot(): string {
-  return path.resolve(process.cwd(), "storage", "uploads");
+  // Must match the same root images use (IMAGE_UPLOAD_DIR, defaulting to
+  // <cwd>/uploads) — that's the only uploads path Docker Compose actually
+  // persists as a volume. A prior "storage/uploads" root here wrote documents
+  // to an unmounted path that was silently wiped on every container restart.
+  return process.env.IMAGE_UPLOAD_DIR
+    ? path.resolve(process.env.IMAGE_UPLOAD_DIR)
+    : path.resolve(process.cwd(), "uploads");
 }
 
 export function isSafeDocumentUrl(fileUrl: string): boolean {
