@@ -111,7 +111,7 @@ function FirearmCard({ firearm, editMode, editBuilds, onDeleteBuild }: FirearmCa
   return (
     <div className="bg-vault-surface border border-vault-border rounded-lg overflow-hidden hover:border-[#00C2FF]/30 transition-colors group flex flex-col">
       {/* Image / Placeholder */}
-      <div className="h-40 bg-vault-bg relative overflow-hidden border-b border-vault-border">
+      <div className="aspect-square bg-vault-bg relative overflow-hidden border-b border-vault-border">
         {firearm.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img

@@ -22,6 +22,7 @@ import {
   Hash,
   FileText,
   TrendingUp,
+  Image as ImageIcon,
 } from "lucide-react";
 
 const FIREARM_TYPE_LABELS: Record<string, string> = {
@@ -391,6 +392,23 @@ export default async function FirearmDetailPage({
             }))}
           />
         </div>
+
+        {firearm.imageUrl && (
+          <div className="bg-vault-surface border border-vault-border rounded-lg overflow-hidden">
+            <div className="flex items-center gap-2 px-4 pt-4 pb-3">
+              <ImageIcon className="w-4 h-4 text-vault-text-faint" />
+              <h3 className="text-xs font-semibold uppercase tracking-widest text-vault-text-muted">Photo</h3>
+            </div>
+            <div className="bg-vault-bg border-t border-vault-border flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={firearm.imageUrl}
+                alt={firearm.name}
+                className="w-full max-h-[560px] object-contain"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
